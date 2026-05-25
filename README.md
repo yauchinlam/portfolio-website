@@ -120,4 +120,4 @@ Output is written to `dist/`.
 
 ## License
 
-Private portfolio project. All rights reserved unless otherwise noted.
+This project is licensed under the [MIT License](LICENSE). You are free to use, copy, modify, merge, publish, distribute, sublicense, and sell copies, subject to the conditions in the license file.
