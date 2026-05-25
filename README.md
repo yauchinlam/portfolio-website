@@ -12,7 +12,8 @@ Personal portfolio site for **Yauchin M. Lam** — a single-page React applicati
 | Build tool | Vite 6 |
 | Styling | Component-scoped CSS files |
 | Contact form | [EmailJS](https://www.emailjs.com/) (`@emailjs/browser`) |
-| Deployment target | Static build (`dist/`) — e.g. GitHub Pages, Azure Static Web Apps, Netlify |
+| Hosting (IaC) | Azure Static Web Apps via Terraform (`terraform/`) |
+| Deployment | Static build (`dist/`) — GitHub Actions (planned) or SWA CLI |
 
 ## Project structure
 
@@ -40,6 +41,13 @@ portfolio-website/
 ├── tsconfig.json            # Project references (app + node)
 ├── tsconfig.app.json
 ├── tsconfig.node.json
+├── staticwebapp.config.json # Azure SWA SPA routing (fallback to index.html)
+├── terraform/               # Azure Static Web App infrastructure (see DevOps)
+│   ├── main.tf
+│   ├── variables.tf
+│   ├── outputs.tf
+│   ├── versions.tf
+│   └── terraform.tfvars.example
 ├── .env.example             # EmailJS env var template (committed)
 └── .env                     # Local secrets (gitignored)
 ```
@@ -99,6 +107,117 @@ npm run preview   # optional: serve dist locally
 ```
 
 Output is written to `dist/`.
+
+## DevOps — Azure Static Web Apps
+
+Infrastructure for hosting this site is defined as code under `terraform/`. Terraform provisions the Azure resources; the React app is published via a **manually triggered** GitHub Actions workflow (not on every push to `main`).
+
+### What Terraform creates
+
+| Resource | File | Purpose |
+|----------|------|---------|
+| Resource group | `terraform/main.tf` | Container for the Static Web App |
+| Static Web App | `terraform/main.tf` | Hosts the production `dist/` assets |
+
+Provider: [azurerm](https://registry.terraform.io/providers/hashicorp/azurerm/latest) `~> 4.0`.
+
+### Prerequisites (infrastructure)
+
+- [Terraform](https://www.terraform.io/downloads) >= 1.5
+- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) — `az login` and an active subscription
+- A **globally unique** `static_web_app_name` (letters and numbers only)
+
+### Provision Azure resources
+
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars — set static_web_app_name (e.g. swa-yauchinlam-portfolio)
+
+terraform init
+terraform plan
+terraform apply
+```
+
+Sensitive/local files are gitignored: `terraform.tfvars`, `.terraform/`, `*.tfstate*`.
+
+### Terraform outputs
+
+After `terraform apply`:
+
+```bash
+terraform output static_web_app_url      # https://<name>.azurestaticapps.net
+terraform output -raw api_key            # Deployment token (sensitive)
+terraform output vite_build_config       # Suggested SWA build settings
+```
+
+| Output | Use |
+|--------|-----|
+| `static_web_app_url` | Public site URL |
+| `api_key` | Deploy with SWA CLI or GitHub Actions secret `AZURE_STATIC_WEB_APPS_API_TOKEN` |
+| `vite_build_config` | Aligns CI with this repo’s Vite setup |
+
+### Azure Static Web Apps build settings
+
+When connecting CI/CD (GitHub Actions or Azure’s deployment center), use:
+
+| Setting | Value |
+|---------|--------|
+| App location | `/` |
+| Output location | `dist` |
+| Build command | `npm run build` |
+
+`VITE_EMAILJS_*` variables must be available at **build time** (GitHub Actions secrets or pipeline env), not only in local `.env`.
+
+### SPA routing on Azure
+
+`staticwebapp.config.json` rewrites unknown routes to `index.html` so client-side navigation works if you add React Router later. Hash-based section links (`#about`, etc.) work without extra rules.
+
+### GitHub Actions CI/CD (manual deploy)
+
+Workflow: [`.github/workflows/azure-static-web-apps.yml`](.github/workflows/azure-static-web-apps.yml)
+
+**Trigger:** GitHub → **Actions** → **Deploy to Azure Static Web Apps** → **Run workflow** (no automatic runs on push).
+
+**Repository secrets** (Settings → Secrets and variables → Actions):
+
+| Secret | Source |
+|--------|--------|
+| `AZURE_STATIC_WEB_APPS_API_TOKEN` | `terraform output -raw api_key` after `terraform apply` |
+| `VITE_EMAILJS_SERVICE_ID` | EmailJS dashboard |
+| `VITE_EMAILJS_TEMPLATE_ID` | EmailJS dashboard |
+| `VITE_EMAILJS_PUBLIC_KEY` | EmailJS dashboard |
+
+The workflow runs `npm ci`, builds with `npm run build` (including Vite env vars), and uploads `dist/` to the Static Web App.
+
+Optional: create a GitHub **environment** named `production` (Settings → Environments) to gate approvals before deploy.
+
+### Deploy application code (local / CLI alternative)
+
+```bash
+npm run build
+npx @azure/static-web-apps-cli deploy ./dist --deployment-token "<api_key from terraform output>"
+```
+
+### Destroy infrastructure
+
+```bash
+cd terraform
+terraform destroy
+```
+
+### DevOps layout summary
+
+```
+┌─────────────────┐     terraform apply      ┌──────────────────────────┐
+│  terraform/     │ ───────────────────────► │ Azure Resource Group     │
+│  (azurerm)      │                            │ + Static Web App         │
+└─────────────────┘                            └────────────┬─────────────┘
+                                                            │
+┌─────────────────┐     npm run build + deploy              │
+│  src/ → dist/   │ ───────────────────────────────────────►│ *.azurestaticapps.net
+└─────────────────┘     (Actions: Run workflow, or SWA CLI)   └──────────────────────────┘
+```
 
 ## Customization
 

@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars and set a globally unique name (lowercase letters and numbers only).
+# static_web_app_name = "swa-yauchinlam-portfolio"
+
+resource_group_name = "rg-portfolio-website"
+location            = "eastus2"
+static_web_app_name = "swa-your-unique-name-here"
+sku_tier            = "Free"
+sku_size            = "Free"
+
+tags = {
+  project = "portfolio-website"
+  owner   = "yauchinlam"
+  managed = "terraform"
+}
