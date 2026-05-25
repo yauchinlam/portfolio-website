@@ -1,0 +1,23 @@
+.footer {
+  padding: 1.5rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.footer__inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.footer__inner p {
+  margin: 0;
+}
+
+.footer__links {
+  display: flex;
+  gap: 1.25rem;
+}
