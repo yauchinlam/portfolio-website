@@ -1,6 +1,6 @@
-# Deploy the Vite/React portfolio to Azure Static Web Apps.
-# Trigger: manual only (Actions tab → "Deploy to Azure Static Web Apps" → Run workflow).
-
+# Deploy the Vite/React portfolio to Azure Static Web Apps (application only).
+# Infrastructure is provisioned separately: workflow "Terraform Azure Infrastructure".
+# Trigger: manual only (Actions → Deploy to Azure Static Web Apps → Run workflow).
 name: Deploy to Azure Static Web Apps
 
 on:

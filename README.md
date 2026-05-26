@@ -13,7 +13,7 @@ Personal portfolio site for **Yauchin M. Lam** — a single-page React applicati
 | Styling | Component-scoped CSS files |
 | Contact form | [EmailJS](https://www.emailjs.com/) (`@emailjs/browser`) |
 | Hosting (IaC) | Azure Static Web Apps via Terraform (`terraform/`) |
-| Deployment | Static build (`dist/`) — GitHub Actions (planned) or SWA CLI |
+| Deployment | Manual GitHub Actions — Terraform (infra) + SWA deploy (app) |
 
 ## Project structure
 
@@ -42,6 +42,7 @@ portfolio-website/
 ├── tsconfig.app.json
 ├── tsconfig.node.json
 ├── staticwebapp.config.json # Azure SWA SPA routing (fallback to index.html)
+├── .github/workflows/       # Manual CI/CD (Terraform + app deploy)
 ├── terraform/               # Azure Static Web App infrastructure (see DevOps)
 │   ├── main.tf
 │   ├── variables.tf
@@ -110,7 +111,14 @@ Output is written to `dist/`.
 
 ## DevOps — Azure Static Web Apps
 
-Infrastructure for hosting this site is defined as code under `terraform/`. Terraform provisions the Azure resources; the React app is published via a **manually triggered** GitHub Actions workflow (not on every push to `main`).
+Infrastructure for hosting this site is defined as code under `terraform/`. **Two manual GitHub Actions workflows** follow best practice by separating infrastructure from application deployment:
+
+| Workflow | Purpose | When to run |
+|----------|---------|-------------|
+| [Terraform Azure Infrastructure](.github/workflows/terraform-azure-infrastructure.yml) | Create/update/destroy Azure resources | First time, or when infra changes |
+| [Deploy to Azure Static Web Apps](.github/workflows/azure-static-web-apps.yml) | Build React app and upload `dist/` | After infra exists, when site code changes |
+
+Neither workflow runs automatically on push to `main`.
 
 ### What Terraform creates
 
@@ -140,6 +148,52 @@ terraform apply
 ```
 
 Sensitive/local files are gitignored: `terraform.tfvars`, `.terraform/`, `*.tfstate*`.
+
+### One-time bootstrap (remote Terraform state)
+
+GitHub Actions needs a remote backend so state is not lost between runs. Create these **once** in Azure (Portal or CLI):
+
+| Resource | Example name |
+|----------|----------------|
+| Resource group | `rg-terraform-state` |
+| Storage account | `stportfoliotfstate` (globally unique, lowercase) |
+| Container | `tfstate` |
+
+Grant your deployment identity **Storage Blob Data Contributor** on the storage account (for state) and **Contributor** on the subscription or target resource group (for SWA).
+
+### GitHub Actions — Terraform workflow (infrastructure)
+
+Workflow: [`.github/workflows/terraform-azure-infrastructure.yml`](.github/workflows/terraform-azure-infrastructure.yml)
+
+**Trigger:** Actions → **Terraform Azure Infrastructure** → Run workflow → choose `plan`, `apply`, or `destroy`.
+
+**Repository secrets** (Settings → Secrets and variables → Actions):
+
+| Secret | Purpose |
+|--------|---------|
+| `AZURE_CLIENT_ID` | App registration / federated credential client ID |
+| `AZURE_TENANT_ID` | Azure AD tenant ID |
+| `AZURE_SUBSCRIPTION_ID` | Target subscription |
+
+Use [Azure OIDC with GitHub Actions](https://learn.microsoft.com/en-us/azure/developer/github/connect-from-azure-openid-connect): create an app registration, federated credential for `repo:yauchinlam/portfolio-website:environment:production`, and assign **Contributor** (scoped as needed).
+
+**Repository variables** (Settings → Secrets and variables → Actions → Variables):
+
+| Variable | Example | Purpose |
+|----------|---------|---------|
+| `TF_STATE_RESOURCE_GROUP` | `rg-terraform-state` | State storage RG |
+| `TF_STATE_STORAGE_ACCOUNT` | `stportfoliotfstate` | State storage account |
+| `TF_STATE_CONTAINER` | `tfstate` | Blob container |
+| `TF_STATE_KEY` | `portfolio-website.tfstate` | State file name |
+| `TF_VAR_static_web_app_name` | `swa-yauchinlam-portfolio` | Globally unique SWA name |
+| `TF_VAR_resource_group_name` | `rg-portfolio-website` | Optional override |
+| `TF_VAR_location` | `eastus2` | Optional override |
+
+**Typical order:** `plan` → review → `apply` → copy deployment token → app deploy workflow.
+
+For **destroy**, set `confirm_destroy` to `destroy` when prompted.
+
+Local `terraform init` without backend flags still works if you configure a `backend.tf` locally; in CI, backend config is passed at init time.
 
 ### Terraform outputs
 
@@ -173,13 +227,13 @@ When connecting CI/CD (GitHub Actions or Azure’s deployment center), use:
 
 `staticwebapp.config.json` rewrites unknown routes to `index.html` so client-side navigation works if you add React Router later. Hash-based section links (`#about`, etc.) work without extra rules.
 
-### GitHub Actions CI/CD (manual deploy)
+### GitHub Actions — App deploy (Static Web App)
 
 Workflow: [`.github/workflows/azure-static-web-apps.yml`](.github/workflows/azure-static-web-apps.yml)
 
-**Trigger:** GitHub → **Actions** → **Deploy to Azure Static Web Apps** → **Run workflow** (no automatic runs on push).
+**Trigger:** Actions → **Deploy to Azure Static Web Apps** → Run workflow (requires infra already applied).
 
-**Repository secrets** (Settings → Secrets and variables → Actions):
+**Repository secrets:**
 
 | Secret | Source |
 |--------|--------|
@@ -209,14 +263,13 @@ terraform destroy
 ### DevOps layout summary
 
 ```
-┌─────────────────┐     terraform apply      ┌──────────────────────────┐
-│  terraform/     │ ───────────────────────► │ Azure Resource Group     │
-│  (azurerm)      │                            │ + Static Web App         │
-└─────────────────┘                            └────────────┬─────────────┘
-                                                            │
-┌─────────────────┐     npm run build + deploy              │
-│  src/ → dist/   │ ───────────────────────────────────────►│ *.azurestaticapps.net
-└─────────────────┘     (Actions: Run workflow, or SWA CLI)   └──────────────────────────┘
+┌──────────────────────────────┐   Terraform workflow (apply)   ┌──────────────────────────┐
+│  terraform/                  │ ─────────────────────────────► │ Azure RG + Static Web App│
+└──────────────────────────────┘                                └────────────┬─────────────┘
+                                                                               │
+┌──────────────────────────────┐   SWA deploy workflow          ┌──────────────▼─────────────┐
+│  src/ → dist/                │ ─────────────────────────────► │ *.azurestaticapps.net      │
+└──────────────────────────────┘                                └────────────────────────────┘
 ```
 
 ## Customization

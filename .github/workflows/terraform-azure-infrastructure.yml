@@ -1,0 +1,108 @@
+# Provisions Azure infrastructure (resource group + Static Web App) via Terraform.
+# Trigger: manual only — separate from the app deploy workflow (best practice).
+#
+# Order: run this workflow first (apply), copy api_key to AZURE_STATIC_WEB_APPS_API_TOKEN,
+#        then run "Deploy to Azure Static Web Apps".
+
+name: Terraform Azure Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Terraform command to run
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+      confirm_destroy:
+        description: Required for destroy — type destroy to confirm
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: terraform-azure-infrastructure
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: true
+  ARM_USE_OIDC: true
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  TF_VAR_static_web_app_name: ${{ vars.TF_VAR_static_web_app_name }}
+  TF_VAR_resource_group_name: ${{ vars.TF_VAR_resource_group_name }}
+  TF_VAR_location: ${{ vars.TF_VAR_location }}
+
+jobs:
+  terraform:
+    name: Terraform ${{ inputs.action }}
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - name: Block accidental destroy
+        if: inputs.action == 'destroy' && inputs.confirm_destroy != 'destroy'
+        run: |
+          echo "::error::Destroy blocked. Re-run with confirm_destroy set to 'destroy'."
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Terraform init
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ vars.TF_STATE_CONTAINER }}" \
+            -backend-config="key=${{ vars.TF_STATE_KEY }}"
+
+      - name: Terraform format check
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        if: inputs.action == 'plan'
+        run: terraform plan -no-color -input=false
+
+      - name: Terraform apply
+        if: inputs.action == 'apply'
+        run: terraform apply -auto-approve -no-color -input=false
+
+      - name: Terraform destroy
+        if: inputs.action == 'destroy'
+        run: terraform destroy -auto-approve -no-color -input=false
+
+      - name: Post-apply summary
+        if: inputs.action == 'apply'
+        run: |
+          URL=$(terraform output -raw static_web_app_url)
+          echo "## Infrastructure deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Site URL:** $URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Next step:** Run \`terraform output -raw api_key\` locally (or re-check Azure Portal) and save it as the \`AZURE_STATIC_WEB_APPS_API_TOKEN\` repository secret, then run **Deploy to Azure Static Web Apps**." >> "$GITHUB_STEP_SUMMARY"
