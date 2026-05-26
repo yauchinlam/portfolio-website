@@ -50,6 +50,13 @@ export type Project = {
 
 export const projects: Project[] = [
   {
+    title: "Terraform Infrastructure",
+    description:
+      "Bootstrap Terraform for Azure remote state, deploy identity, and GitHub Actions OIDC—foundational IaC for secure, repeatable cloud deployments.",
+    tags: ["Terraform", "Azure", "GitHub Actions", "OIDC"],
+    githubUrl: "https://github.com/yauchinlam/terraform-infrastructure",
+  },
+  {
     title: "AI Prompts Library",
     description:
       "Curated AI prompt instructions and patterns created with Claude AI—organized for reusable engineering, documentation, and LLM workflow design.",
